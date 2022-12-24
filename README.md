@@ -9,6 +9,8 @@ Error: buildx failed with: ERROR: denied: requested access to the resource is de
 
 The solution is to set up Public as the default repo type on your DockerHub repo. 
 
+This is V1 test
+
 </br>
 
 [![Create and publish a Docker image](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml/badge.svg?branch=latest)](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml)
