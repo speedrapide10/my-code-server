@@ -40,5 +40,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-#          repository: speedrapide10/my-code-server
-#          tags: latest, ${{ gitHub.run_number }}
