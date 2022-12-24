@@ -32,5 +32,5 @@ jobs:
         with:
           context: .
           push: true
-          repository: speedrapide10/my-code-server
-          tags: latest, ${{ gitHub.run_number }}
+          tags: speedrapide10/my-code-server:latest, ${{ gitHub.run_number }}
+#          repository: speedrapide10/my-code-server
