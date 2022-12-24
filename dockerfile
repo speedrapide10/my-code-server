@@ -17,4 +17,4 @@ RUN \
     python3-pip \
     iputils-ping \
     python3 \
-    sudo && \
+    sudo
