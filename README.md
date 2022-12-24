@@ -13,6 +13,6 @@ This is V1 test
 
 </br>
 
-[![Create and publish a Docker image](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml/badge.svg?branch=latest)](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml)
+[![Create and publish a Docker image as package](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml/badge.svg)](https://github.com/speedrapide10/my-code-server/actions/workflows/deploy-image-github-package.yml)  
 
 [![Publish Docker image](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml/badge.svg)](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml)
