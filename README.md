@@ -1,5 +1,5 @@
 # my-code-server
-This repo contains my custom code-server where i added some basic packages like python3/python3-pip... 
+This repo contains my custom code-server where i added some basic packages like python3/python3-pip/ping/... 
 
 Make sur your not running out of private repos on your DockerHub repo cause it would give you the error message:  
 
