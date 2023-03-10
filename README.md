@@ -9,7 +9,7 @@ Error: buildx failed with: ERROR: denied: requested access to the resource is de
 ````
 
 The solution is to set up Public as the default repo type on your DockerHub account. 
-
+  
 
 </br>
 
