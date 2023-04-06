@@ -18,4 +18,4 @@ RUN \
     iputils-ping \
     python3 \
     sudo && \
-  echo "Yopiiiiiiiiii its wooooooooooooorking"
+  echo "Yopiiiiiiiiiii its woooooooooooorking"
