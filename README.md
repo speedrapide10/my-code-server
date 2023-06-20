@@ -1,6 +1,7 @@
 # my-code-server Container Image CI/CD  
 
-This repo contains my custom code-server container image where i added some basic packages like python3/python3-pip/ping/... 
+This repo contains my custom code-server container image where i added some basic packages like python3/python3-pip/ping/...  
+Source image [linuxserver/code-server](https://github.com/linuxserver/docker-code-server)
 
 Make sur your not running out of private repos on your DockerHub repo cause it would give you the error message when running GitHub Workflows:  
 
@@ -17,4 +18,4 @@ The solution is to set up Public as the default repo type on your DockerHub acco
 
 [![Publish Docker image](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml/badge.svg)](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml)
 
-vscode v4.12.2 released
+vscode v4.14.0 released
