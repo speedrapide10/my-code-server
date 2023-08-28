@@ -1,6 +1,6 @@
 # my-code-server Container Image CI/CD  
 
-This repo contains my custom code-server container image where i added some basic packages like python3/python3-pip/ping/...  
+This repo contains my custom code-server container image where i added some basic packages like python3/python3-pip/ping/dnsutils/...  
 Source image [linuxserver/code-server](https://github.com/linuxserver/docker-code-server)
 
 Make sur your not running out of private repos on your DockerHub repo cause it would give you the error message when running GitHub Workflows:  
