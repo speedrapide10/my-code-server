@@ -17,5 +17,6 @@ RUN \
     python3-pip \
     iputils-ping \
     python3 \
+    dnsutils \
     sudo && \
   echo "Yopiiiiiiiiii its wooooooooooorking"
