@@ -1,7 +1,8 @@
-name: Poll Remote Repo and Build Image (ONE-TIME FORCE BUILD)
+name: Poll Remote Repo and Build Image
 
 on:
-  # Run this manually ONLY
+  schedule:
+    - cron: "0 4,16 * * *" # Every 6 hours
   workflow_dispatch:
 
 jobs:
@@ -13,11 +14,9 @@ jobs:
       contents: read
       
     steps:
-      # --- STEP 1: CHECKOUT ---
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      # --- STEP 2: LOG IN TO REGISTRIES ---
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -31,17 +30,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- STEP 3: POLL FOR NEWEST TAG (NO SKOPEO) ---
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
       - name: Poll remote tags and prepare build list
-        id: poll # Step ID, so we can use its "outputs" later
+        id: poll
         env:
           REMOTE_REPO_URL: "https://github.com/linuxserver/docker-code-server.git"
           DOCKER_HUB_IMAGE: "speedrapide10/my-code-server"
           GHCR_IMAGE: "ghcr.io/${{ github.repository }}"
+          DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASS: ${{ secrets.DOCKER_PASSWORD }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x # Enable verbose logging
           
-          echo "--- START: Poll remote tags (FORCE BUILD) ---"
+          echo "--- START: Poll remote tags ---"
           
           # --- A. Get NEWEST Remote Tag ---
           echo "Fetching newest tag from $REMOTE_REPO_URL..."
@@ -54,25 +59,39 @@ jobs:
                                (head -n 1) )
 
           if [ -z "$NEWEST_REMOTE_TAG" ]; then
-            echo "::error::No remote tags found matching pattern. Cannot proceed."
-            exit 1
+            echo "::warning::No remote tags found matching pattern. Exiting successfully."
+            echo "build-needed=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           echo "Found newest remote tag: $NEWEST_REMOTE_TAG"
+          echo "Checking if tag exists on $DOCKER_HUB_IMAGE..."
 
-          # --- B. FORCE BUILD ---
-          echo "::warning::Forcing first build for $NEWEST_REMOTE_TAG to create repository."
+          # --- B. Authenticate Skopeo ---
+          echo "Logging into registries with skopeo..."
+          skopeo login -u "$DOCKER_USER" -p "$DOCKER_PASS" docker.io > /dev/null 2>&1
+          skopeo login -u "$GHCR_USER" -p "$GHCR_PASS" ghcr.io > /dev/null 2>&1
+
+          # --- C. Check if NEWEST tag already exists ---
+          skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1
+          SKOPEO_EXIT_CODE=$?
           
-          # We will tag the build with both the specific tag and 'latest'
-          FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG, $DOCKER_HUB_IMAGE:latest, $GHCR_IMAGE:$NEWEST_REMOTE_TAG, $GHCR_IMAGE:latest"
-          
-          echo "Tags to build: $FINAL_TAGS_TO_BUILD"
-          echo "build-needed=true" >> $GITHUB_OUTPUT
-          echo "final-tags=$FINAL_TAGS_TO_BUILD" >> $GITHUB_OUTPUT
-          
+          if [ $SKOPEO_EXIT_CODE -eq 0 ]; then
+            # Exit code 0 means tag WAS found
+            echo "::notice::Tag $NEWEST_REMOTE_TAG already exists on Docker Hub. No build needed."
+            echo "build-needed=false" >> $GITHUB_OUTPUT
+          else
+            # Exit code is not 0, tag was NOT found. We need to build.
+            echo "::notice::Tag $NEWEST_REMOTE_TAG is new. Proceeding with build."
+            
+            FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG, $DOCKER_HUB_IMAGE:latest, $GHCR_IMAGE:$NEWEST_REMOTE_TAG, $GHCR_IMAGE:latest"
+            
+            echo "Tags to build: $FINAL_TAGS_TO_BUILD"
+            echo "build-needed=true" >> $GITHUB_OUTPUT
+            echo "final-tags=$FINAL_TAGS_TO_BUILD" >> $GITHUB_OUTPUT
+          fi
           echo "--- END: Poll remote tags ---"
 
-      # --- STEP 4: BUILD AND PUSH ---
       - name: Build and push Docker images
         if: steps.poll.outputs.build-needed == 'true'
         uses: docker/build-push-action@v5
