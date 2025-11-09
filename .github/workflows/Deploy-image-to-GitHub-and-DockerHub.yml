@@ -1,79 +1,152 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# GitHub recommends pinning actions to a commit SHA.
-# To get a newer version, you will need to update the SHA.
-# You can also reference a tag or branch, but the action may change without warning.
-
-name: Publish Docker image
+# Workflow Name
+name: Poll Remote Repo and Build Image
 
 on:
-# THE FOLLOWING LINE IS USED FOR MANUAL TRIGGERING
+  # ----------------------------------------------------------------------------
+  # TRIGGERS
+  # ----------------------------------------------------------------------------
+  
+  # 1. Manual Trigger
+  # Allows running this workflow manually from the GitHub "Actions" tab.
   workflow_dispatch:
 
-#  schedule:
-#    - cron: "0 10 * * *"
-  push:
-    branches:
-      - "**"
-    tags:
-      - "v*.*.*"
-#  pull_request:
-#    branches:
-#      - "main"
-
-#on:
-#  push:
-#    branches: ['latest']
+  # 2. Scheduled Trigger (Cron)
+  # Runs the workflow automatically. "0 */6 * * *" means "at minute 0,
+  # every 6 hours" (4 times per day).
+  # You can adjust this schedule. Once per day would be "0 4 * * *".
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours
 
 jobs:
-  push_to_registries:
-    name: Push Docker image to multiple registries
+  poll-and-build:
+    name: Poll Tags and Build New Images
     runs-on: ubuntu-latest
+    
+    # Permissions needed:
+    # - packages: write (to push to GHCR)
+    # - contents: read (to checkout the repo)
     permissions:
       packages: write
       contents: read
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
       
+    steps:
+      # --- STEP 1: CHECKOUT ---
+      # Checks out YOUR repository's code (to get the Dockerfile)
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      # --- STEP 2: LOG IN TO REGISTRIES ---
       - name: Log in to Docker Hub
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: |
-            speedrapide10/my-code-server
-            ghcr.io/${{ github.actor }}/${{ github.repository }}
-          # generate Docker tags based on the following events/attributes
-          tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
+
+      # --- STEP 3: INSTALL VERIFICATION TOOL ---
+      # Install 'skopeo', a lightweight tool used to inspect
+      # images on a registry (to see if a tag already exists)
+      # without needing to pull the whole image.
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      # --- STEP 4: TAG POLLING AND BUILD LOGIC ---
+      # This is the main step. It connects to the remote repo,
+      # compares its tags to yours, and prepares a list of what to build.
+      - name: Poll remote tags and prepare build list
+        id: poll # Step ID, so we can use its "outputs" later
+        env:
+          # --- VARIABLES TO UPDATE IF NEEDED ---
+          REMOTE_REPO_URL: "https://github.com/linuxserver/docker-code-server.git"
+          DOCKER_HUB_IMAGE: "speedrapide10/my-code-server"
+          GHCR_IMAGE: "ghcr.io/${{ github.repository }}" # Uses your GitHub repo name
+          
+          # Secrets for skopeo to authenticate with registries
+          DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASS: ${{ secrets.DOCKER_PASSWORD }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # --- A. Get Remote Tags ---
+          echo "Fetching tags from $REMOTE_REPO_URL..."
+          
+          # 1. Get all tags from the remote repo
+          # 2. Grep: Keep only 'ls' type tags
+          # 3. Sed: Clean the 'refs/tags/' prefix
+          # 4. Grep: Ensure the format is as expected (e.g., 4.105.1-ls304)
+          # 5. Sort -V -r: Sort by version, newest first
+          REMOTE_TAGS=$(git ls-remote --tags $REMOTE_REPO_URL | \
+                          awk '{print $2}' | \
+                          grep 'refs/tags/.*-ls' | \
+                          sed 's_refs/tags/g' | \
+                          grep -E '^[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$' | \
+                          sort -V -r)
+
+          if [ -z "$REMOTE_TAGS" ]; then
+            echo "No remote tags found matching pattern. Exiting."
+            echo "build-needed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found remote tags. Checking against Docker Hub image: $DOCKER_HUB_IMAGE"
+          FINAL_TAGS_TO_BUILD="" # Variable to store the tags we need to build
+
+          # --- B. Authenticate Skopeo ---
+          # Needed to query private registries or avoid rate limits
+          skopeo login -u "$DOCKER_USER" -p "$DOCKER_PASS" docker.io
+          skopeo login -u "$GHCR_USER" -p "$GHCR_PASS" ghcr.io
+
+          # --- C. Compare Remote Tags to Registry Tags ---
+          for TAG in $REMOTE_TAGS; do
+            echo "--- Checking Tag: $TAG ---"
             
+            # Check if the tag already exists on Docker Hub
+            skopeo inspect "docker://$DOCKER_HUB_IMAGE:$TAG" > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+              # Tag does NOT exist
+              echo "Tag $TAG is new. Adding to build list."
+              
+              # Prepare the multi-registry tag list for the build action
+              # e.g., "image1:tag,image2:tag"
+              if [ -z "$FINAL_TAGS_TO_BUILD" ]; then
+                FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$TAG,$GHCR_IMAGE:$TAG"
+              else
+                FINAL_TAGS_TO_BUILD="$FINAL_TAGS_TO_BUILD,$DOCKER_HUB_IMAGE:$TAG,$GHCR_IMAGE:$TAG"
+              fi
+            else
+              # Tag ALREADY exists
+              echo "Tag $TAG already exists on Docker Hub. Stopping check."
+              # Since tags are sorted newest-first, we can stop
+              # as soon as we find one that already exists.
+              break
+            fi
+          done
+
+          # --- D. Set Outputs for the Next Step ---
+          if [ -z "$FINAL_TAGS_TO_BUILD" ]; then
+            echo "No new tags to build. Nothing to do."
+            echo "build-needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "New tags to build: $FINAL_TAGS_TO_BUILD"
+            echo "build-needed=true" >> $GITHUB_OUTPUT
+            echo "final-tags=$FINAL_TAGS_TO_BUILD" >> $GITHUB_OUTPUT
+          fi
+
+      # --- STEP 5: BUILD AND PUSH (Conditional) ---
+      # This step will only run if the 'poll' step set "build-needed=true"
       - name: Build and push Docker images
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        if: steps.poll.outputs.build-needed == 'true'
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          # Pushes all the new tags collected in the 'poll' step
+          tags: ${{ steps.poll.outputs.final-tags }}
+          labels: "org.opencontainers.image.source=${{ github.repositoryUrl }}"
