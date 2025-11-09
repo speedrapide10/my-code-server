@@ -10,6 +10,9 @@
 name: Publish Docker image
 
 on:
+# THE FOLLOWING LINE IS USED FOR MANUAL TRIGGERING
+  workflow_dispatch:
+
 #  schedule:
 #    - cron: "0 10 * * *"
   push:
