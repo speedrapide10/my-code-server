@@ -1,21 +1,13 @@
-name: Poll Remote Repo and Build Image
+name: Poll Remote Repo and Build Image (ONE-TIME FORCE BUILD)
 
 on:
-  # 1. Run automatically twice a day (04:00 and 16:00 UTC)
-  schedule:
-    - cron: "0 4,16 * * *"
-  
-  # 2. Allow manual triggers from the GitHub Actions tab
+  # Run this manually ONLY
   workflow_dispatch:
 
 jobs:
   poll-and-build:
     name: Poll Tags and Build New Images
     runs-on: ubuntu-latest
-    
-    # Permissions needed:
-    # - packages: write (to push to GHCR)
-    # - contents: read (to checkout the repo)
     permissions:
       packages: write
       contents: read
@@ -39,35 +31,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- STEP 3: INSTALL VERIFICATION TOOL ---
-      - name: Install skopeo
-        run: sudo apt-get update && sudo apt-get install -y skopeo
-
-      # --- STEP 4: POLL, COMPARE, AND PREPARE BUILD LIST ---
+      # --- STEP 3: POLL FOR NEWEST TAG (NO SKOPEO) ---
       - name: Poll remote tags and prepare build list
         id: poll # Step ID, so we can use its "outputs" later
         env:
-          # --- Environment Variables ---
           REMOTE_REPO_URL: "https://github.com/linuxserver/docker-code-server.git"
           DOCKER_HUB_IMAGE: "speedrapide10/my-code-server"
           GHCR_IMAGE: "ghcr.io/${{ github.repository }}"
-          DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASS: ${{ secrets.DOCKER_PASSWORD }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Enable verbose command logging for this step
-          set -x
+          set -x # Enable verbose logging
           
-          echo "--- START: Poll remote tags ---"
-          echo "Remote Repo: $REMOTE_REPO_URL"
-          echo "Docker Hub Image: $DOCKER_HUB_IMAGE"
-          echo "GHCR Image: $GHCR_IMAGE"
+          echo "--- START: Poll remote tags (FORCE BUILD) ---"
           
           # --- A. Get NEWEST Remote Tag ---
           echo "Fetching newest tag from $REMOTE_REPO_URL..."
-          
-          # Use '|| true' on each piped command to prevent "Broken pipe" errors from failing the step
           NEWEST_REMOTE_TAG=$( (git ls-remote --tags $REMOTE_REPO_URL || true) | \
                                (awk '{print $2}' || true) | \
                                (grep 'refs/tags/.*-ls' || true) | \
@@ -77,43 +54,25 @@ jobs:
                                (head -n 1) )
 
           if [ -z "$NEWEST_REMOTE_TAG" ]; then
-            echo "::warning::No remote tags found matching pattern. Exiting successfully."
-            echo "build-needed=false" >> $GITHUB_OUTPUT
-            exit 0
+            echo "::error::No remote tags found matching pattern. Cannot proceed."
+            exit 1
           fi
 
           echo "Found newest remote tag: $NEWEST_REMOTE_TAG"
-          echo "Checking if tag exists on $DOCKER_HUB_IMAGE..."
 
-          # --- B. Authenticate Skopeo ---
-          echo "Logging into registries with skopeo..."
-          skopeo login -u "$DOCKER_USER" -p "$DOCKER_PASS" docker.io > /dev/null 2>&1
-          skopeo login -u "$GHCR_USER" -p "$GHCR_PASS" ghcr.io > /dev/null 2>&1
-
-          # --- C. Check if NEWEST tag already exists ---
-          # We check Docker Hub as the source of truth
-          skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1
-          SKOPEO_EXIT_CODE=$?
+          # --- B. FORCE BUILD ---
+          echo "::warning::Forcing first build for $NEWEST_REMOTE_TAG to create repository."
           
-          if [ $SKOPEO_EXIT_CODE -eq 0 ]; then
-            # Exit code 0 means tag WAS found
-            echo "::notice::Tag $NEWEST_REMOTE_TAG already exists on Docker Hub. No build needed."
-            echo "build-needed=false" >> $GITHUB_OUTPUT
-          else
-            # Exit code is not 0, tag was NOT found. We need to build.
-            echo "::notice::Tag $NEWEST_REMOTE_TAG is new. Proceeding with build."
-            
-            # We will tag the build with both the specific tag and 'latest'
-            FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG, $DOCKER_HUB_IMAGE:latest, $GHCR_IMAGE:$NEWEST_REMOTE_TAG, $GHCR_IMAGE:latest"
-            
-            echo "Tags to build: $FINAL_TAGS_TO_BUILD"
-            echo "build-needed=true" >> $GITHUB_OUTPUT
-            echo "final-tags=$FINAL_TAGS_TO_BUILD" >> $GITHUB_OUTPUT
-          fi
+          # We will tag the build with both the specific tag and 'latest'
+          FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG, $DOCKER_HUB_IMAGE:latest, $GHCR_IMAGE:$NEWEST_REMOTE_TAG, $GHCR_IMAGE:latest"
+          
+          echo "Tags to build: $FINAL_TAGS_TO_BUILD"
+          echo "build-needed=true" >> $GITHUB_OUTPUT
+          echo "final-tags=$FINAL_TAGS_TO_BUILD" >> $GITHUB_OUTPUT
+          
           echo "--- END: Poll remote tags ---"
 
-      # --- STEP 5: BUILD AND PUSH (Conditional) ---
-      # This step will only run if the 'poll' step set "build-needed=true"
+      # --- STEP 4: BUILD AND PUSH ---
       - name: Build and push Docker images
         if: steps.poll.outputs.build-needed == 'true'
         uses: docker/build-push-action@v5
@@ -121,6 +80,5 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          # Pushes all the new tags collected in the 'poll' step
           tags: ${{ steps.poll.outputs.final-tags }}
           labels: "org.opencontainers.image.source=${{ github.repositoryUrl }}"
