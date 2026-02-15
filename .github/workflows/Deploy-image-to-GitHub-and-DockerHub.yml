@@ -60,14 +60,11 @@ jobs:
           set -x
           
           echo "--- START: Poll remote tags ---"
-          echo "Remote Repo: $REMOTE_REPO_URL"
-          echo "Docker Hub Image: $DOCKER_HUB_IMAGE"
-          echo "GHCR Image: $GHCR_IMAGE"
           
           # --- A. Get NEWEST Remote Tag ---
           echo "Fetching newest tag from $REMOTE_REPO_URL..."
           
-          # Use '|| true' on each piped command to prevent "Broken pipe" errors from failing the step
+          # Use '|| true' to prevent pipe failures
           NEWEST_REMOTE_TAG=$( (git ls-remote --tags $REMOTE_REPO_URL || true) | \
                                (awk '{print $2}' || true) | \
                                (grep 'refs/tags/.*-ls' || true) | \
@@ -83,7 +80,6 @@ jobs:
           fi
 
           echo "Found newest remote tag: $NEWEST_REMOTE_TAG"
-          echo "Checking if tag exists on $DOCKER_HUB_IMAGE..."
 
           # --- B. Authenticate Skopeo ---
           echo "Logging into registries with skopeo..."
@@ -91,18 +87,32 @@ jobs:
           skopeo login -u "$GHCR_USER" -p "$GHCR_PASS" ghcr.io > /dev/null 2>&1
 
           # --- C. Check if NEWEST tag already exists ---
-          # We check Docker Hub as the source of truth
+          # We check BOTH Docker Hub and GHCR. If it is missing from EITHER, we build.
           
-          if skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1; then
-            # Exit code 0 means tag WAS found
-            echo "::notice::Tag $NEWEST_REMOTE_TAG already exists on Docker Hub. No build needed."
+          MISSING_ON_DOCKERHUB=false
+          if ! skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1; then
+            MISSING_ON_DOCKERHUB=true
+            echo "::notice::Tag $NEWEST_REMOTE_TAG is missing on Docker Hub."
+          fi
+
+          MISSING_ON_GHCR=false
+          if ! skopeo inspect "docker://$GHCR_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1; then
+            MISSING_ON_GHCR=true
+            echo "::notice::Tag $NEWEST_REMOTE_TAG is missing on GHCR."
+          fi
+
+          # --- Decision ---
+          if [ "$MISSING_ON_DOCKERHUB" = "false" ] && [ "$MISSING_ON_GHCR" = "false" ]; then
+            # Exit code 0 means tag WAS found on BOTH
+            echo "::notice::Tag $NEWEST_REMOTE_TAG already exists on BOTH Docker Hub and GHCR. No build needed."
             echo "build-needed=false" >> $GITHUB_OUTPUT
           else
-            # Exit code is not 0 (command failed), so tag was NOT found. We need to build.
-            echo "::notice::Tag $NEWEST_REMOTE_TAG is new. Proceeding with build."
+            # Tag is missing on at least one registry
+            echo "::notice::Tag $NEWEST_REMOTE_TAG is new or missing from one registry. Proceeding with build."
             
-            # We will tag the build with both the specific tag and 'latest'
-            FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG, $DOCKER_HUB_IMAGE:latest, $GHCR_IMAGE:$NEWEST_REMOTE_TAG, $GHCR_IMAGE:latest"
+            # We will tag the build with both the specific tag and 'latest' for BOTH registries
+            # Comma-separated list, no spaces
+            FINAL_TAGS_TO_BUILD="$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG,$DOCKER_HUB_IMAGE:latest,$GHCR_IMAGE:$NEWEST_REMOTE_TAG,$GHCR_IMAGE:latest"
             
             echo "Tags to build: $FINAL_TAGS_TO_BUILD"
             echo "build-needed=true" >> $GITHUB_OUTPUT
