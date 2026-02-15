@@ -14,4 +14,4 @@ The solution is to set up Public as the default repo type on your DockerHub acco
 
 [![Poll Remote Repo and Build Image](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml/badge.svg)](https://github.com/speedrapide10/my-code-server/actions/workflows/Deploy-image-to-GitHub-and-DockerHub.yml)
 
-![Latest Version](https://img.shields.io/docker/v/speedrapide10/my-code-server?sort=semver&label=latest%20version)
+[![Docker Image Version](https://img.shields.io/docker/v/speedrapide10/my-code-server?sort=semver&logo=docker&label=version)](https://hub.docker.com/r/speedrapide10/my-code-server)
