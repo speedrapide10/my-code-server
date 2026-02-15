@@ -132,3 +132,4 @@ jobs:
           # Pushes all the new tags collected in the 'poll' step
           tags: ${{ steps.poll.outputs.final-tags }}
           labels: "org.opencontainers.image.source=${{ github.repositoryUrl }}"
+          provenance: false
