@@ -92,15 +92,13 @@ jobs:
 
           # --- C. Check if NEWEST tag already exists ---
           # We check Docker Hub as the source of truth
-          skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1
-          SKOPEO_EXIT_CODE=$?
           
-          if [ $SKOPEO_EXIT_CODE -eq 0 ]; then
+          if skopeo inspect "docker://$DOCKER_HUB_IMAGE:$NEWEST_REMOTE_TAG" > /dev/null 2>&1; then
             # Exit code 0 means tag WAS found
             echo "::notice::Tag $NEWEST_REMOTE_TAG already exists on Docker Hub. No build needed."
             echo "build-needed=false" >> $GITHUB_OUTPUT
           else
-            # Exit code is not 0, tag was NOT found. We need to build.
+            # Exit code is not 0 (command failed), so tag was NOT found. We need to build.
             echo "::notice::Tag $NEWEST_REMOTE_TAG is new. Proceeding with build."
             
             # We will tag the build with both the specific tag and 'latest'
